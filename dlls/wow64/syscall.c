@@ -102,6 +102,7 @@ static void     (WINAPI *pBTCpuProcessInit)(void);
 static NTSTATUS (WINAPI *pBTCpuSetContext)(HANDLE,HANDLE,void *,void *);
 static void     (WINAPI *pBTCpuThreadInit)(void);
 static void     (WINAPI *pBTCpuSimulate)(void) __attribute__((used));
+static NTSTATUS (WINAPI *pBTCpuSuspendLocalThread)(HANDLE,ULONG *);  /* Hangover addition */
 static void *   (WINAPI *p__wine_get_unix_opcode)(void);
 static void *   (WINAPI *pKiRaiseUserExceptionDispatcher)(void);
 void     (WINAPI *pBTCpuFlushInstructionCache2)( const void *, SIZE_T ) = NULL;
@@ -901,6 +902,26 @@ static HMODULE load_64bit_module( const WCHAR *name )
     return module;
 }
 
+/* Hangover: helper to read environment variable */
+static DWORD wow64GetEnvironmentVariableW( LPCWSTR name, LPWSTR val, DWORD size )
+{
+    UNICODE_STRING us_name, us_value;
+    NTSTATUS status;
+    DWORD len;
+
+    RtlInitUnicodeString( &us_name, name );
+    us_value.Length = 0;
+    us_value.MaximumLength = (size ? size - 1 : 0) * sizeof(WCHAR);
+    us_value.Buffer = val;
+
+    status = RtlQueryEnvironmentVariable_U( NULL, &us_name, &us_value );
+    len = us_value.Length / sizeof(WCHAR);
+    if (status == STATUS_BUFFER_TOO_SMALL) return len + 1;
+    if (status) return 0;
+    if (!size) return len + 1;
+    val[len] = 0;
+    return len;
+}
 
 /**********************************************************************
  *           get_cpu_dll_name
@@ -909,17 +930,27 @@ static const WCHAR *get_cpu_dll_name(void)
 {
     static ULONG buffer[32];
     KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
+    WCHAR *cpu_dll = (WCHAR*)buffer;
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW;
     const WCHAR *ret;
     HANDLE key;
     ULONG size;
+    UINT res;
+
+    /* Hangover: first check HODLL environment variable */
+    if ((res = wow64GetEnvironmentVariableW( L"HODLL", cpu_dll, ARRAY_SIZE(buffer))) &&
+        res < ARRAY_SIZE(buffer))
+        return cpu_dll;
 
     switch (current_machine)
     {
     case IMAGE_FILE_MACHINE_I386:
+        /* Hangover: for ARM64 host, use wowbox64.dll */
+        if (native_machine == IMAGE_FILE_MACHINE_ARM64)
+            return L"wowbox64.dll";
         RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\Software\\Microsoft\\Wow64\\x86" );
-        ret = (native_machine == IMAGE_FILE_MACHINE_ARM64 ? L"xtajit.dll" : L"wow64cpu.dll");
+        ret = L"wow64cpu.dll";
         break;
     case IMAGE_FILE_MACHINE_ARMNT:
         RtlInitUnicodeString( &nameW, L"\\Registry\\Machine\\Software\\Microsoft\\Wow64\\arm" );
@@ -1016,6 +1047,8 @@ static DWORD WINAPI process_init( RTL_RUN_ONCE *once, void *param, void **contex
     GET_PTR( BTCpuResetToConsistentState );
     GET_PTR( BTCpuSetContext );
     GET_PTR( BTCpuSimulate );
+    /* Hangover: get SuspendLocalThread */
+    GET_PTR( BTCpuSuspendLocalThread );
     GET_PTR( BTCpuFlushInstructionCache2 );
     GET_PTR( BTCpuFlushInstructionCacheHeavy );
     GET_PTR( BTCpuNotifyMapViewOfSection );
@@ -1710,4 +1743,13 @@ NTSTATUS WINAPI Wow64RaiseException( int code, EXCEPTION_RECORD *rec )
     raise_exception( &rec32, &ctx32, first_chance, rec );
 
     return STATUS_SUCCESS;
+}
+
+
+/**********************************************************************
+ *            Wow64SuspendLocalThread (wow64.@)  -- Hangover addition
+ */
+NTSTATUS WINAPI Wow64SuspendLocalThread( HANDLE thread, ULONG *count )
+{
+    return pBTCpuSuspendLocalThread( thread, count );
 }
