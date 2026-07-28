@@ -464,6 +464,7 @@ BOOLEAN WINAPI RtlWow64RequestCrossProcessHeavyFlush( CROSS_PROCESS_WORK_HDR *li
 }
 
 
+#if !defined(__aarch64__) && !defined(__arm64ec__)
 /***********************************************************************
  *              RtlWow64SuspendThread (NTDLL.@)
  */
@@ -472,6 +473,7 @@ NTSTATUS WINAPI RtlWow64SuspendThread( HANDLE thread, ULONG *count )
     /* FIXME: Use Wow64SuspendLocalThread when available */
     return NtSuspendThread( thread, count );
 }
+#endif /* !defined(__aarch64__) && !defined(__arm64ec__) */
 
 #endif /* _WIN64 */
 
