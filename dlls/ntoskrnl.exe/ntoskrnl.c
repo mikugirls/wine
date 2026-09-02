@@ -2859,6 +2859,34 @@ void WINAPI KeRevertToUserAffinityThreadEx(KAFFINITY affinity)
 }
 
 /***********************************************************************
+ *           KeRegisterBugCheckCallback   (NTOSKRNL.EXE.@)
+ */
+BOOLEAN WINAPI KeRegisterBugCheckCallback(void *record, void *routine,
+                                          void *buffer, ULONG length, char *component)
+{
+    FIXME("%p %p %p %lu %s stub.\n", record, routine, buffer, length, debugstr_a(component));
+    return TRUE;
+}
+
+/***********************************************************************
+ *           KeRegisterBugCheckReasonCallback   (NTOSKRNL.EXE.@)
+ */
+BOOLEAN WINAPI KeRegisterBugCheckReasonCallback(void *record, void *routine, ULONG reason, char *component)
+{
+    FIXME("%p %p %lu %s stub.\n", record, routine, reason, debugstr_a(component));
+    return TRUE;
+}
+
+/***********************************************************************
+ *           KeDeregisterBugCheckReasonCallback   (NTOSKRNL.EXE.@)
+ */
+BOOLEAN WINAPI KeDeregisterBugCheckReasonCallback(void *record)
+{
+    FIXME("%p stub.\n", record);
+    return TRUE;
+}
+
+/***********************************************************************
  *           IoRegisterFileSystem   (NTOSKRNL.EXE.@)
  */
 VOID WINAPI IoRegisterFileSystem(PDEVICE_OBJECT DeviceObject)
@@ -3030,9 +3058,12 @@ PVOID WINAPI MmMapLockedPages( MDL *mdl, KPROCESSOR_MODE mode )
 PVOID WINAPI  MmMapLockedPagesSpecifyCache(PMDLX MemoryDescriptorList, KPROCESSOR_MODE AccessMode, MEMORY_CACHING_TYPE CacheType,
                                            PVOID BaseAddress, ULONG BugCheckOnFailure, MM_PAGE_PRIORITY Priority)
 {
-    FIXME("(%p, %u, %u, %p, %lu, %u): stub\n", MemoryDescriptorList, AccessMode, CacheType, BaseAddress, BugCheckOnFailure, Priority);
+    TRACE("(%p, %u, %u, %p, %lu, %u)\n", MemoryDescriptorList, AccessMode, CacheType,
+          BaseAddress, BugCheckOnFailure, Priority);
 
-    return NULL;
+    if (BaseAddress) FIXME("requested base address %p ignored\n", BaseAddress);
+
+    return MmMapLockedPages( MemoryDescriptorList, AccessMode );
 }
 
 /***********************************************************************
@@ -3040,7 +3071,9 @@ PVOID WINAPI  MmMapLockedPagesSpecifyCache(PMDLX MemoryDescriptorList, KPROCESSO
  */
 void WINAPI MmUnmapLockedPages( void *base, MDL *mdl )
 {
-    FIXME( "(%p %p_\n", base, mdl );
+    TRACE( "%p %p\n", base, mdl );
+
+    mdl->MdlFlags &= ~MDL_MAPPED_TO_SYSTEM_VA;
 }
 
 /***********************************************************************
@@ -3066,7 +3099,9 @@ PVOID WINAPI MmPageEntireDriver(PVOID AddrInSection)
  */
 void WINAPI MmProbeAndLockPages(PMDLX MemoryDescriptorList, KPROCESSOR_MODE AccessMode, LOCK_OPERATION Operation)
 {
-    FIXME("(%p, %u, %u): stub\n", MemoryDescriptorList, AccessMode, Operation);
+    TRACE("(%p, %u, %u)\n", MemoryDescriptorList, AccessMode, Operation);
+
+    MemoryDescriptorList->MdlFlags |= MDL_PAGES_LOCKED;
 }
 
 
@@ -3084,7 +3119,9 @@ void WINAPI MmResetDriverPaging(PVOID AddrInSection)
  */
 void WINAPI  MmUnlockPages(PMDLX MemoryDescriptorList)
 {
-    FIXME("(%p): stub\n", MemoryDescriptorList);
+    TRACE("(%p)\n", MemoryDescriptorList);
+
+    MemoryDescriptorList->MdlFlags &= ~MDL_PAGES_LOCKED;
 }
 
 
