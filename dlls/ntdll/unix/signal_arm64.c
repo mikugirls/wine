@@ -772,15 +772,18 @@ NTSTATUS get_thread_wow64_context( HANDLE handle, void *ctx, ULONG size )
 static void setup_raise_exception( struct thread_data *data, ucontext_t *sigcontext,
                                    EXCEPTION_RECORD *rec, CONTEXT *context )
 {
+    CHPE_V2_CPU_AREA_INFO *chpe = data->teb->ChpeV2CpuAreaInfo;
     struct exc_stack_layout *stack;
     void *stack_ptr = (void *)(SP_sig(sigcontext) & ~15);
-    NTSTATUS status;
 
-    status = send_debug_event( data, rec, context, TRUE, TRUE );
-    if (status == DBG_CONTINUE || status == DBG_EXCEPTION_HANDLED)
+    if (!chpe || !chpe->InSimulation)
     {
-        restore_context( data, context, sigcontext );
-        return;
+        NTSTATUS status = send_debug_event( data, rec, context, TRUE, TRUE );
+        if (status == DBG_CONTINUE || status == DBG_EXCEPTION_HANDLED)
+        {
+            restore_context( data, context, sigcontext );
+            return;
+        }
     }
 
     /* fix up instruction pointer in context for EXCEPTION_BREAKPOINT */
@@ -914,11 +917,12 @@ __ASM_GLOBAL_FUNC( call_user_mode_callback,
                    "add x8, x29, #0xd0\n\t"
                    "stp x7, x8, [x1, #0x110]\n\t" /* frame->prev_frame,syscall_cfa */
                    "ldr w11, [x18, #0x380]\n\t"   /* thread_data->syscall_trace */
-                   "cbnz x11, 1f\n\t"
+                   "cbnz x11, 2f\n\t"
                    /* switch to user stack */
-                   "mov sp, x0\n\t"               /* user_sp */
+                   "1:mov sp, x0\n\t"             /* user_sp */
+                   __ASM_LOCAL_LABEL("call_user_mode_callback_user_stack") ":\n\t"
                    "br x3\n"
-                   "1:\tmov x19, x18\n\t"         /* teb */
+                   "2:\tmov x19, x18\n\t"         /* teb */
                    "mov x20, x0\n\t"              /* user_sp */
                    "mov x21, x3\n\t"              /* func */
                    "mov sp, x1\n\t"
@@ -927,8 +931,9 @@ __ASM_GLOBAL_FUNC( call_user_mode_callback,
                    "str x0, [x29, #0xc0]\n\t"     /* id */
                    "bl " __ASM_NAME("trace_usercall") "\n\t"
                    "mov x18, x19\n\t"             /* teb */
-                   "mov sp, x20\n\t"              /* user_sp */
-                   "br x21" )
+                   "mov x0, x20\n\t"              /* user_sp */
+                   "mov x3, x21\n\t"
+                   "b 1b" )
 
 
 /***********************************************************************
@@ -1419,6 +1424,7 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
     extern const ULONG_PTR __wine_syscall_dispatcher_user_stack;
     extern const ULONG_PTR __wine_unix_call_dispatcher_kernel_stack_ptr;
     extern const ULONG_PTR __wine_unix_call_dispatcher_user_stack;
+    extern const ULONG_PTR call_user_mode_callback_user_stack_ptr;
 
     /* if we're in a syscall dispatcher, but not yet on the syscall stack, construct
      * the frame now from the signal context. */
@@ -1439,6 +1445,10 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *_sigcontext )
     {
         struct syscall_frame *frame = get_syscall_frame( data );
         PC_sig(sigcontext) = frame->pc;
+    }
+    else if (PC_sig(sigcontext) == call_user_mode_callback_user_stack_ptr)
+    {
+        PC_sig(sigcontext) = REGn_sig(3, sigcontext);
     }
 
     if (!data->teb)
@@ -1938,5 +1948,8 @@ __ASM_GLOBAL_POINTER( __ASM_NAME("__wine_unix_call_dispatcher_kernel_stack_ptr")
                       __ASM_LOCAL_LABEL("__wine_unix_call_dispatcher_kernel_stack") )
 __ASM_GLOBAL_POINTER( __ASM_NAME("__wine_unix_call_dispatcher_user_stack"),
                       __ASM_LOCAL_LABEL("__wine_unix_call_dispatcher_user_stack") )
+
+__ASM_GLOBAL_POINTER( __ASM_NAME("call_user_mode_callback_user_stack_ptr"),
+                      __ASM_LOCAL_LABEL("call_user_mode_callback_user_stack") )
 
 #endif  /* __aarch64__ */
